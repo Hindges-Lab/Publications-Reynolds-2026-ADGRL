@@ -1,0 +1,93 @@
+from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import numpy as np
+import pandas as pd
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    return df[(df.index.get_level_values('window_time') > 10) &
+              (df.index.get_level_values('window_time') < 30)]
+
+def group_df_by_trial_average(df):
+    return df.groupby(["folder_name", "stimulus_name"]).mean()
+
+def get_mean_and_sem_stimuli(df):
+    stimuli = df.index.unique('stimulus_name')
+    fishes = df.index.unique('folder_name')
+    means_per_stimulus = []
+    sems_per_stimulus = []
+    for stimulus in stimuli:
+        means_per_fish = []
+        for fish in fishes:
+            df_stimulus_fish = df.xs((fish, stimulus), level=('folder_name', 'stimulus_name'))
+            if len(df_stimulus_fish) > 0:
+                means_per_fish.append(np.nanmean(df_stimulus_fish['interbout_interval'].values))
+        means_per_stimulus.append(np.nanmean(means_per_fish))
+        sems_per_stimulus.append(np.nanstd(means_per_fish) / np.sqrt(len(means_per_fish)))
+    return means_per_stimulus, sems_per_stimulus, stimuli
+
+
+
+def plotting_func(x, y, e, stimuli, name_of_dataset, color_of_plot, ax):
+    ax.errorbar(x, y, yerr=e, ls="None", color=color_of_plot, elinewidth=1.5)
+    ax.scatter(x, y, marker="o", color=color_of_plot, s=100, linewidths=2.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(['0.6', '1.3', '2.6', '5.1', '10.3', '20.6', '41.1'], fontsize=18)
+    # ax.set_xticklabels(stimuli, rotation=90, ha="right", fontsize=8)
+    ax.set_xlabel("Stripe width (mm)", fontsize=20)
+    ax.set_ylabel("Interbout interval (s)", fontsize=20)
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.set_ylim(0.5, 1)
+    ax.set_yticks([0.5, 0.6, 0.7, 0.8, 0.9, 1])
+    ax.set_yticklabels(['0.5', '0.6', '0.7', '0.8', '0.9', '1.0'], fontsize=18)
+
+
+
+
+
+def extract_means_and_sems(list_of_means_per_stimulus, list_of_sems_per_stimulus, stimuli, filter_str):
+    filtered_stimuli = [stim for stim in stimuli if filter_str in stim]
+    means = [list_of_means_per_stimulus[i] for i, stim in enumerate(stimuli) if filter_str in stim]
+    sems = [list_of_sems_per_stimulus[i] for i, stim in enumerate(stimuli) if filter_str in stim]
+
+    return filtered_stimuli, means, sems
+
+
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
+
+
+datasets = {"Controls": path1, "Mutants": path2}
+
+fig, ax = plt.subplots(1, 2, figsize=(14, 7))
+
+
+for dataset_name, path in datasets.items():
+    df = group_df_by_trial_average(label_bouts(path))
+    means, sems, stimuli = get_mean_and_sem_stimuli(df)
+
+    stimuli_0_25, means_0_25, sems_0_25 = extract_means_and_sems(means, sems, stimuli, '_0.25_')
+    stimuli_0_75, means_0_75, sems_0_75 = extract_means_and_sems(means, sems, stimuli, '_0.75_')
+
+    x_0_25 = np.arange(len(stimuli_0_25))
+    plotting_func(x_0_25, means_0_25, sems_0_25, stimuli_0_25, dataset_name,
+                  "plum" if dataset_name == "Controls" else "skyblue", ax[0]) #palevioletred
+
+    x_0_75 = np.arange(len(stimuli_0_75))
+    plotting_func(x_0_75, means_0_75, sems_0_75, stimuli_0_75, dataset_name,
+                  "rebeccapurple" if dataset_name == "Controls" else "cornflowerblue", ax[1]) ##C20078
+
+    print(f"{dataset_name} data Means and SEMs:")
+    for stim, mean, sem in zip(stimuli, means, sems):
+        print(f"Stimulus: {stim}, Mean: {mean}, SEM: {sem}")
+        
+plt.tight_layout()
+plt.subplots_adjust(wspace=0.3)
+plt.savefig(path_to_output_folder.joinpath('interbout_interval.svg'), format="svg")
+plt.savefig(path_to_output_folder.joinpath('interbout_interval.jpg'), format="jpg")
+plt.show()
