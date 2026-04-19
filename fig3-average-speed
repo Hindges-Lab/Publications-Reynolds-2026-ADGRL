@@ -55,11 +55,9 @@ def extract_means_and_sems(list_of_means_per_stimulus, list_of_sems_per_stimulus
 
 
 
-path1 = Path(
-    '/Volumes/Reynolds/Other-projects/Matt_Parker/Overall-behaviour-analysis/Controls/Analysis/data_analysed.hdf5')
-path2 = Path(
-    '/Volumes/Reynolds/Other-projects/Matt_Parker/Overall-behaviour-analysis/Mutants/Analysis/data_analysed.hdf5')
-path_to_output_folder = Path('/Volumes/Reynolds/Other-projects/Matt_Parker/Paper/Graphs/March2026/Fig3')
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
 
 datasets = {"Controls": path1, "Mutants": path2}
 
