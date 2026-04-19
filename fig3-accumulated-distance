@@ -1,0 +1,217 @@
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import numpy as np
+import pandas as pd
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    return df[(df.index.get_level_values('window_time') > 10) &
+              (df.index.get_level_values('window_time') < 30)]
+
+def group_df_by_trial_total_distance(df):
+    return df.groupby(["folder_name", "stimulus_name"])["distance_change"].sum()
+
+def get_mean_and_sem_stimuli_total_distance(series):
+    stimuli = series.index.unique('stimulus_name')
+    fishes = series.index.unique('folder_name')
+    means_per_stimulus = []
+    sems_per_stimulus = []
+
+    for stimulus in stimuli:
+        values = []
+        for fish in fishes:
+            try:
+                value = series.loc[(fish, stimulus)]
+                values.append(value)
+            except KeyError:
+                continue
+        means_per_stimulus.append(np.nanmean(values))
+        sems_per_stimulus.append(np.nanstd(values) / np.sqrt(len(values)))
+    return means_per_stimulus, sems_per_stimulus, stimuli
+
+def plotting_func(x, y, e, stimuli, name_of_dataset, color_of_plot, ax):
+    ax.errorbar(x, y, yerr=e, ls="None", color=color_of_plot, elinewidth=1.5)
+    ax.scatter(x, y, marker="o", color=color_of_plot, s=100, linewidths=2.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(['0.6', '1.3', '2.6', '5.1', '10.3', '20.6', '41.1'], fontsize=18)
+    ax.set_xlabel("Stripe width (mm)", fontsize=20)
+    ax.set_ylabel("Total distance swam (mm)", fontsize=20)
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.set_ylim(8.3333, 15)
+    ax.set_yticks([8.3333, 10, 11.6667, 13.333, 15])
+    ax.set_yticklabels(['500', '600', '700', '800', '900'], fontsize=18)
+
+def extract_means_and_sems(list_of_means_per_stimulus, list_of_sems_per_stimulus, stimuli, filter_str):
+    filtered_stimuli = [stim for stim in stimuli if filter_str in stim]
+    means = [list_of_means_per_stimulus[i] for i, stim in enumerate(stimuli) if filter_str in stim]
+    sems = [list_of_sems_per_stimulus[i] for i, stim in enumerate(stimuli) if filter_str in stim]
+    return filtered_stimuli, means, sems
+
+
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
+
+all_values_dir = path_to_output_folder / "all-values"
+all_values_dir.mkdir(parents=True, exist_ok=True)
+
+datasets = {"Controls": path1, "Mutants": path2}
+all_results = []
+
+
+fig, ax = plt.subplots(1, 2, figsize=(14, 7))
+
+for dataset_name, path in datasets.items():
+    df = group_df_by_trial_total_distance(label_bouts(path))
+    means, sems, stimuli = get_mean_and_sem_stimuli_total_distance(df)
+    
+    stimuli_0_25, means_0_25, sems_0_25 = extract_means_and_sems(means, sems, stimuli, '_0.25_')
+    stimuli_0_75, means_0_75, sems_0_75 = extract_means_and_sems(means, sems, stimuli, '_0.75_')
+
+    plotting_func(np.arange(len(stimuli_0_25)), means_0_25, sems_0_25, stimuli_0_25,
+                  dataset_name, "plum" if dataset_name == "Controls" else "skyblue", ax[0])
+
+    plotting_func(np.arange(len(stimuli_0_75)), means_0_75, sems_0_75, stimuli_0_75,
+                  dataset_name, "rebeccapurple" if dataset_name == "Controls" else "cornflowerblue", ax[1])
+
+    for stim, mean, sem in zip(stimuli, means, sems):
+        all_results.append({"Dataset": dataset_name, "Stimulus": stim, "Mean": mean, "SEM": sem})
+
+
+results_df = pd.DataFrame(all_results)
+results_df.to_csv(all_values_dir / "total_distance_means_sems.csv", index=False)
+
+plt.tight_layout()
+plt.subplots_adjust(wspace=0.3)
+plt.savefig(path_to_output_folder / 'total_accumulated_distance.svg', format="svg")
+plt.savefig(path_to_output_folder / 'total_accumulated_distance.jpg', format="jpg")
+plt.show()
+
+
+########################################################################################################################
+#bar graph with points
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    return df[(df.index.get_level_values('window_time') > 10) &
+              (df.index.get_level_values('window_time') < 30)]
+
+
+def group_df_by_trial_total_distance(df):
+    return df.groupby(["folder_name", "stimulus_name"])["distance_change"].sum()
+
+
+def get_fish_level_totals(series, filter_str):
+    fish_vals = {}
+    for (fish, stimulus), value in series.items():
+        if filter_str in stimulus:
+            fish_vals.setdefault(fish, []).append(value)
+    return [np.nanmean(vals) for vals in fish_vals.values()]
+
+
+
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
+
+
+all_values_folder = path_to_output_folder / "all-values"
+all_values_folder.mkdir(parents=True, exist_ok=True)
+
+datasets = {
+    "WT": path1,
+    r"$\it{adgrl3.1}^{-/-}$": path2
+}
+contrast_filters = ['_0.25_', '_0.75_']
+
+
+all_data = []
+for contrast in contrast_filters:
+    for group_name, path in datasets.items():
+        df = group_df_by_trial_total_distance(label_bouts(path))
+        vals = get_fish_level_totals(df, contrast)
+        for i, v in enumerate(vals):
+            all_data.append({
+                "Group": group_name,
+                "Contrast": contrast.strip('_'),
+                "FishID": f"{group_name}_Fish{i + 1}",
+                "Value_mm": v
+            })
+
+df_output = pd.DataFrame(all_data)
+csv_output_path = all_values_folder / "total_distance_all_values.csv"
+df_output.to_csv(csv_output_path, index=False)
+
+
+colors_low = {
+    "WT": "plum", 
+    r"$\it{adgrl3.1}^{-/-}$": "skyblue"}
+colors_high = {
+    "WT": "rebeccapurple",
+    r"$\it{adgrl3.1}^{-/-}$": "cornflowerblue"}
+fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+
+for i, contrast in enumerate(contrast_filters):
+    ax = axs[i]
+    group_means = []
+    group_sems = []
+    all_fish_vals = []
+
+    for name, path in datasets.items():
+        df = group_df_by_trial_total_distance(label_bouts(path))
+        fish_vals = get_fish_level_totals(df, contrast)
+        all_fish_vals.append(fish_vals)
+
+        mean_val = np.nanmean(fish_vals)
+        sem_val = np.nanstd(fish_vals) / np.sqrt(len(fish_vals))
+
+        group_means.append(mean_val)
+        group_sems.append(sem_val)
+
+    x = np.arange(len(datasets))
+    color_map = colors_low if contrast == '_0.25_' else colors_high
+
+    #Bars
+    ax.bar(
+        x, group_means, yerr=group_sems, capsize=8,
+        color=[color_map[name] for name in datasets.keys()],
+        edgecolor='black', linewidth=2,
+        error_kw=dict(elinewidth=2.5, capthick=2.5)
+    )
+    #indiviudal points
+    for xi, vals in zip(x, all_fish_vals):
+        ax.scatter(
+            np.full_like(vals, xi, dtype=float), vals,
+            facecolor='black', edgecolor='black',
+            zorder=10, s=50, linewidths=2, alpha=0.3
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(list(datasets.keys()), fontsize=18)
+    ax.set_ylabel("Total distance swam (mm)", fontsize=20)
+    ax.set_title(f"{contrast.strip('_')} Contrast", fontsize=20)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.tick_params(axis='y', labelsize=18)
+    ax.set_ylim(0, 30)
+    ax.set_yticks([0, 5, 10, 15, 20, 25, 30])
+    ax.set_yticklabels(['0', '300', '600', '900', '1200', '1500', '1800'], fontsize=18)
+
+plt.tight_layout()
+plt.subplots_adjust(wspace=0.3)
+plt.savefig(path_to_output_folder / 'total_accumulated_distance_individuals.svg', format='svg')
+plt.savefig(path_to_output_folder / 'total_accumulated_distance_individuals.jpg', format='jpg')
+plt.show()
+
