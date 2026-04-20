@@ -7,9 +7,9 @@ from scipy.stats import sem
 import matplotlib.gridspec as gridspec
 
 
-path1 = Path('/Volumes/Reynolds/Other-projects/Matt_Parker/Overall-behaviour-analysis/Controls/Analysis/data_analysed.hdf5')
-path2 = Path('/Volumes/Reynolds/Other-projects/Matt_Parker/Overall-behaviour-analysis/Mutants/Analysis/data_analysed.hdf5')
-path_to_output_folder = Path('/Volumes/Reynolds/Other-projects/Matt_Parker/Paper/Graphs/March2026/Fig4')
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
 datasets = {"Controls": path1, "Mutants": path2}
 
 def label_bouts(path):
