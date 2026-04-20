@@ -1,0 +1,190 @@
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy.stats import sem
+import matplotlib.gridspec as gridspec
+
+
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
+datasets = {"Controls": path1, "Mutants": path2}
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    return df[(df.index.get_level_values('window_time') > 10) &
+              (df.index.get_level_values('window_time') < 30)]
+
+def compute_ibi_cv_per_fish(df):
+    grouped = df.groupby(['folder_name', 'stimulus_name'])
+    ibi_cv_list = []
+
+    for (fish, stim), group in grouped:
+        # times = group['interbout_interval'].values
+        times = group.index.get_level_values('window_time').values
+        if len(times) > 1:
+            ibi = np.diff(times)
+            mean_ibi = np.nanmean(ibi)
+            if mean_ibi > 0:
+                cv = np.nanstd(ibi) / mean_ibi
+                ibi_cv_list.append({'folder_name': fish, 'stimulus_name': stim, 'ibi_cv': cv})
+    return pd.DataFrame(ibi_cv_list)
+
+
+
+def compute_speed_cv_per_fish(df):
+    grouped = df.groupby(['folder_name', 'stimulus_name'])
+    speed_cv_list = []
+
+    for (fish, stim), group in grouped:
+        speeds = group['average_speed'].values
+        mean_speed = np.nanmean(speeds)
+        if mean_speed > 0:
+            cv = np.nanstd(speeds) / mean_speed
+            speed_cv_list.append({'folder_name': fish, 'stimulus_name': stim, 'speed_cv': cv})
+    return pd.DataFrame(speed_cv_list)
+
+
+def aggregate_cv(df_cv, colname):
+    grouped = df_cv.groupby('stimulus_name')[colname]
+    means = grouped.mean()
+    sems = grouped.apply(sem)
+    return means, sems
+
+def extract_means_and_sems(means, sems, filter_str):
+    filtered_stimuli = [stim for stim in means.index if filter_str in stim]
+    x = np.arange(len(filtered_stimuli))
+    y = [means[stim] for stim in filtered_stimuli]
+    e = [sems[stim] for stim in filtered_stimuli]
+    return x, y, e, filtered_stimuli
+
+
+def plotting_func(x, y, e, stimuli, name_of_dataset, color_of_plot, ax, ylabel):
+    ax.errorbar(x, y, yerr=e, fmt='o', color=color_of_plot, linewidth=3)
+    ax.scatter(x, y, marker=".", color=color_of_plot, s=100, linewidths=2.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(['0.6', '1.3', '2.6', '5.1', '10.3', '20.6', '41.1'], fontsize=12)
+    ax.set_xlabel("Stripe width (mm)", fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.spines['left'].set_linewidth(2)
+    ax.spines['bottom'].set_linewidth(2)
+    ax.set_ylim(0, 0.5)
+    ax.set_yticks([0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    ax.set_yticklabels(['0', '0.1', '0.2', '0.3', '0.4', '0.5'], fontsize=12)
+    ax.set_title(f"{name_of_dataset}", fontsize=16, fontweight='bold')
+
+
+
+fig, ax = plt.subplots(2, 2, figsize=(12, 8))  # 2 rows (IBI CV on top, speed CV below)
+summary_data = []
+fig = plt.figure(figsize=(10, 10))
+gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1.7], hspace=0.15, wspace=0.3)
+ax = np.empty((2, 2), dtype=object)
+for row in range(2):
+    for col in range(2):
+        ax[row, col] = fig.add_subplot(gs[row, col])
+
+
+def plotting_func(x, y, e, stimuli, name_of_dataset, color_of_plot, ax, ylabel, hide_xaxis=False, ylim_max=0.5, y_ticks=None):
+    ax.errorbar(x, y, yerr=e, fmt='o', color=color_of_plot, linewidth=3)
+    ax.scatter(x, y, marker=".", color=color_of_plot, s=100, linewidths=2.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(['0.6', '1.3', '2.6', '5.1', '10.3', '20.6', '41.1'], fontsize=14)
+    if hide_xaxis:
+        ax.set_xlabel('')
+        ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+        ax.spines['bottom'].set_visible(False)
+    else:
+        ax.set_xlabel("Stripe width (mm)", fontsize=18)
+        ax.spines['bottom'].set_linewidth(2)
+        ax.tick_params(axis='x', labelbottom=True)
+    ax.set_ylabel(ylabel, fontsize=18)
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.spines['left'].set_linewidth(2)
+    if not hide_xaxis:
+        ax.spines['bottom'].set_linewidth(1.5)
+    ax.set_ylim(0, ylim_max)
+    if y_ticks is None:
+        y_ticks = np.linspace(0, ylim_max, num=6)
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels([f"{tick:.1f}" for tick in y_ticks], fontsize=18)
+
+for dataset_name, path in datasets.items():
+    df = label_bouts(path)
+    df_ibi_cv = compute_ibi_cv_per_fish(df)
+    means_ibi, sems_ibi = aggregate_cv(df_ibi_cv, 'ibi_cv')
+    df_speed_cv = compute_speed_cv_per_fish(df)
+    means_speed, sems_speed = aggregate_cv(df_speed_cv, 'speed_cv')
+
+    df_ibi_cv = df_ibi_cv.rename(columns={'ibi_cv': 'CV'})
+    df_ibi_cv['variable'] = 'IBI_CV'
+    df_speed_cv = df_speed_cv.rename(columns={'speed_cv': 'CV'})
+    df_speed_cv['variable'] = 'Speed_CV'
+    df_ibi_cv['Dataset'] = dataset_name
+    df_speed_cv['Dataset'] = dataset_name
+
+    summary_data.append(df_ibi_cv)
+    summary_data.append(df_speed_cv)
+
+    x_0_25, y_0_25, e_0_25, _ = extract_means_and_sems(means_ibi, sems_ibi, '_0.25_')
+    x_0_25_s, y_0_25_s, e_0_25_s, _ = extract_means_and_sems(means_speed, sems_speed, '_0.25_')
+    color_025 = "plum" if dataset_name == "Controls" else "skyblue"
+
+    
+    plotting_func(x_0_25_s, y_0_25_s, e_0_25_s, _, dataset_name + " Speed CV", color_025, ax[0,0],
+                  ylabel="CV of Average speed", hide_xaxis=True, ylim_max=0.3, y_ticks=[0,0.1,0.2,0.3])
+    plotting_func(x_0_25, y_0_25, e_0_25, _, dataset_name + " IBI CV", color_025, ax[1,0],
+                  ylabel="CV of Interbout interval", hide_xaxis=False, ylim_max=0.5 )
+
+
+    x_0_75, y_0_75, e_0_75, _ = extract_means_and_sems(means_ibi, sems_ibi, '_0.75_')
+    x_0_75_s, y_0_75_s, e_0_75_s, _ = extract_means_and_sems(means_speed, sems_speed, '_0.75_')
+    color_075 = "rebeccapurple" if dataset_name == "Controls" else "cornflowerblue"
+
+    plotting_func(x_0_75_s, y_0_75_s, e_0_75_s, _, dataset_name + " Speed CV", color_075, ax[0,1],
+                  ylabel="", hide_xaxis=True, ylim_max=0.3, y_ticks=[0,0.1,0.2,0.3])
+    plotting_func(x_0_75, y_0_75, e_0_75, _, dataset_name + " IBI CV", color_075, ax[1,1],
+                  ylabel="", hide_xaxis=False, ylim_max=0.5)
+
+summary_rows = []
+
+for dataset_name, path in datasets.items():
+    df = label_bouts(path)
+
+    df_ibi_cv = compute_ibi_cv_per_fish(df)
+    means_ibi, sems_ibi = aggregate_cv(df_ibi_cv, 'ibi_cv')
+
+    df_speed_cv = compute_speed_cv_per_fish(df)
+    means_speed, sems_speed = aggregate_cv(df_speed_cv, 'speed_cv')
+
+    for stim in means_ibi.index:
+        summary_rows.append({
+            'Dataset': dataset_name,
+            'Variable': 'IBI_CV',
+            'Stimulus': stim,
+            'Mean_CV': means_ibi[stim],
+            'SEM': sems_ibi[stim]
+        })
+
+    for stim in means_speed.index:
+        summary_rows.append({
+            'Dataset': dataset_name,
+            'Variable': 'Speed_CV',
+            'Stimulus': stim,
+            'Mean_CV': means_speed[stim],
+            'SEM': sems_speed[stim]
+        })
+
+summary_df = pd.DataFrame(summary_rows)
+csv_path_summary = path_to_output_folder / "IBI_and_Speed_CV_Summary.csv"
+summary_df.to_csv(csv_path_summary, index=False)
+
+
+plt.savefig(path_to_output_folder / 'IBI_and_Speed_CV_variance.svg', format='svg')
+plt.savefig(path_to_output_folder / 'IBI_and_Speed_CV_variance.jpg', format='jpg')
+plt.show()
