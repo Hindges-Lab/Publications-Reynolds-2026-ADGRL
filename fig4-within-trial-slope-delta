@@ -1,0 +1,124 @@
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+BLOCK_SIZE = 5
+ORIENTATION_THRESHOLD = 5
+MIN_TIME = 10
+MAX_TIME = 30
+
+path_to_output_folder = Path()
+path_to_output_folder.mkdir(parents=True, exist_ok=True)
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    df = df[
+        (df.index.get_level_values('window_time') > MIN_TIME) &
+        (df.index.get_level_values('window_time') < MAX_TIME)
+    ]
+    df['movement_with_env'] = np.where(
+        df['estimated_orientation_change'] < -ORIENTATION_THRESHOLD, 1, 0
+    )
+    return df
+
+def compute_within_trial_bins(df, bins=[(10, 20), (20, 25), (25, 30)]):
+    bin_labels = [f"{start}-{end}s" for start, end in bins]
+    df = df.copy()
+    df['time_bin'] = pd.cut(
+        df.index.get_level_values('window_time'),
+        bins=[b[0] for b in bins] + [bins[-1][1]],
+        labels=bin_labels,
+        right=False
+    )
+
+    df = df.dropna(subset=['time_bin'])
+    summary = (
+        df.groupby(['folder_name', 'stimulus_name', 'time_bin'])['movement_with_env']
+        .mean()
+        .reset_index()
+        .rename(columns={'movement_with_env': 'success_rate'})
+    )
+    return summary
+
+
+def compute_within_trial_slope_and_delta(raw_df):
+    df = raw_df.copy()
+    df['bin_mid'] = df['time_bin'].str.split('-').apply(
+        lambda x: (float(x[0].replace('s','')) + float(x[1].replace('s',''))) / 2
+    )
+
+    results = []
+    for (folder, stim), group in df.groupby(['folder_name', 'stimulus_name']):
+        if len(group['bin_mid'].unique()) < 2:
+            continue
+        slope, _ = np.polyfit(group['bin_mid'], group['success_rate'], 1)
+        first_bin = group['time_bin'].min()
+        last_bin = group['time_bin'].max()
+        first_mean = group[group['time_bin'] == first_bin]['success_rate'].mean()
+        last_mean = group[group['time_bin'] == last_bin]['success_rate'].mean()
+        delta = first_mean - last_mean
+        results.append({
+            'folder_name': folder,
+            'stimulus_name': stim,
+            'slope': slope,
+            'Δ': delta
+        })
+    return pd.DataFrame(results)
+
+
+def plot_slopes_deltas_mean_sem(control_df, mutant_df, measure='slope', contrasts=['0.25', '0.75']):
+    base_x_labels = [0.6, 1.3, 2.6, 5.1, 10.3, 20.6, 41.1]
+    fig, axes = plt.subplots(1, 2, figsize=(16, 8), sharey=True)
+
+    for i, contrast in enumerate(contrasts):
+        ax = axes[i]
+        if i == 0:
+            c_color, m_color = "plum", "skyblue"
+        else:
+            c_color, m_color = "rebeccapurple", "cornflowerblue"
+
+        control_sub = control_df[control_df['stimulus_name'].str.contains(contrast)]
+        mutant_sub = mutant_df[mutant_df['stimulus_name'].str.contains(contrast)]
+        all_stimuli = sorted(set(control_sub['stimulus_name']).union(mutant_sub['stimulus_name']))
+        num_stimuli = len(all_stimuli)
+
+        for j, stim in enumerate(all_stimuli):
+            c_vals = control_sub[control_sub['stimulus_name'] == stim][measure]
+            m_vals = mutant_sub[mutant_sub['stimulus_name'] == stim][measure]
+            ax.errorbar(j - 0.15, c_vals.mean(), yerr=c_vals.sem(),
+                        fmt='o', color=c_color, markersize=15, elinewidth=2.5)
+            ax.errorbar(j + 0.15, m_vals.mean(), yerr=m_vals.sem(),
+                        fmt='o', color=m_color, markersize=15, elinewidth=2.5)
+        ax.set_xticks(range(num_stimuli))
+        ax.set_xticklabels(base_x_labels[:num_stimuli], fontsize=22)
+        ax.set_xlabel('log stripe width [mm]', fontsize=22)
+        y_label = "Slope" if measure == 'slope' else "$\\Delta$"
+        ax.set_ylabel(y_label, fontsize=22)
+        ax.tick_params(axis='y', labelsize=22)
+        ax.axhline(0, color='gray', linestyle='--')
+        if measure == 'slope':
+            ax.set_ylim(-0.015, 0.015)
+        else:
+            ax.set_ylim(-0.15, 0.15)
+        ax.grid(False)
+        for spine in ['top', 'right']:
+            ax.spines[spine].set_visible(False)
+
+    plt.tight_layout()
+    measure_name = "slope" if measure == 'slope' else "delta"
+    plt.savefig(path_to_output_folder / f"within_trial_{measure_name}_mean_sem.svg")
+    plt.savefig(path_to_output_folder / f"within_trial_{measure_name}_mean_sem.jpg")
+    plt.show()
+
+path_control = Path()
+path_mutant = Path()
+
+df_control = label_bouts(path_control)
+df_mutant = label_bouts(path_mutant)
+within_control = compute_within_trial_bins(df_control)
+within_mutant = compute_within_trial_bins(df_mutant)
+slopes_control = compute_within_trial_slope_and_delta(within_control)
+slopes_mutant = compute_within_trial_slope_and_delta(within_mutant)
+plot_slopes_deltas_mean_sem(slopes_control, slopes_mutant, measure='slope')
+plot_slopes_deltas_mean_sem(slopes_control, slopes_mutant, measure='Δ')
