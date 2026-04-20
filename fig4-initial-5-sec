@@ -1,0 +1,140 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+from scipy.stats import sem
+
+
+path1 = Path()
+path2 = Path()
+path_to_output_folder = Path()
+
+datasets = {"WT": path1, "Mutants": path2}
+
+display_labels = {
+    "WT": "Controls",
+    "Mutants": r"$\it{adgrl3.1}^{-/-}$"
+}
+
+colors = {"WT": "plum", "Mutants": "skyblue"}
+
+def label_bouts(path):
+    df = pd.read_hdf(path, key="analysed")
+    return df[(df.index.get_level_values('window_time') > 0) &
+              (df.index.get_level_values('window_time') < 5)]
+
+def group_df_by_fish_average(df):
+    return df.groupby("folder_name").mean()
+
+def get_mean_and_sem_per_fish(df, variable):
+    fishes = df.index.unique('folder_name')
+    vals_per_fish = []
+    for fish in fishes:
+        try:
+            vals_per_fish.append(df.loc[fish, variable])
+        except KeyError:
+            pass
+    mean_val = np.nanmean(vals_per_fish)
+    sem_val = sem(vals_per_fish) if len(vals_per_fish) > 1 else 0
+    return mean_val, sem_val, vals_per_fish
+
+def plotting_func(x, y, e, labels, ylabel, ax, colors, all_vals,
+                  ylim=None, yticks=None, yticklabels=None):
+    ax.bar(x, y, yerr=e, capsize=10,
+           color=[colors[label] for label in labels],
+           edgecolor='black', linewidth=1.5)
+    for xi, vals in zip(x, all_vals):
+        ax.scatter(np.full_like(vals, xi), vals,
+                   color='black', edgecolors='black', s=60, alpha=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels([display_labels[label] for label in labels], fontsize=20)
+    ax.set_ylabel(ylabel, fontsize=18)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+    ax.tick_params(axis='y', labelsize=20)
+    if ylim:
+        ax.set_ylim(ylim)
+    if yticks is not None:
+        ax.set_yticks(yticks)
+    if yticklabels is not None:
+        ax.set_yticklabels(yticklabels)
+
+variables = ['interbout_interval', 'average_speed', 'distance_change', 'event_freq']
+variable_labels = ['Interbout Interval (s)',
+                   'Average Speed (cm/s)',
+                   'Bout Distance (cm)',
+                   'Event Frequency (Hz)']
+
+y_axis_settings = {
+    'interbout_interval': {
+        'ylim': (0, 3),
+        'yticks': [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        'yticklabels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0']
+    },
+    'average_speed': {
+        'ylim': (0, 0.6),
+        'yticks': [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        'yticklabels': ['0', '0.1', '0.2', '0.3', '0.4', '0.5', '0.6']
+    },
+    'distance_change': {
+        'ylim': (0, 0.166667),
+        'yticks': [0, 0.03333, 0.066667, 0.1, 0.13333, 0.166667],
+        'yticklabels': ['0', '2.0', '4.0', '6.0', '8.0', '10.0']
+    },
+    'event_freq': {
+        'ylim': (0, 40),
+        'yticks': [0, 10, 20, 30, 40],
+        'yticklabels': ['0', '0.5', '1.0', '1.5', '2.0']
+    }
+}
+
+
+fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+for ax, var, label in zip(axes.flatten(), variables, variable_labels):
+    means = []
+    sems = []
+    all_vals = []
+    for dataset_name, path in datasets.items():
+        df = group_df_by_fish_average(label_bouts(path))
+        mean_val, sem_val, vals_per_fish = get_mean_and_sem_per_fish(df, var)
+        means.append(mean_val)
+        sems.append(sem_val)
+        all_vals.append(vals_per_fish)
+
+    x = np.arange(len(datasets))
+    settings = y_axis_settings[var]
+    plotting_func(x, means, sems, list(datasets.keys()),
+                  label, ax, colors, all_vals,
+                  ylim=settings['ylim'],
+                  yticks=settings['yticks'],
+                  yticklabels=settings['yticklabels'])
+
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.subplots_adjust(wspace=0.3, hspace=0.4)
+
+plt.savefig(path_to_output_folder / "initial_5s_variables.svg")
+plt.savefig(path_to_output_folder / "initial_5s_variables.png", dpi=300)
+plt.show()
+
+
+all_rows = []
+for var in variables:
+    for dataset_name, path in datasets.items():
+        df = group_df_by_fish_average(label_bouts(path))
+        fishes = df.index.unique('folder_name')
+        for fish in fishes:
+            try:
+                val = df.loc[fish, var]
+                all_rows.append({
+                    "Dataset": display_labels[dataset_name],
+                    "Variable": var,
+                    "Fish_ID": fish,
+                    "Value": val
+                })
+            except KeyError:
+                pass
+df_stats = pd.DataFrame(all_rows)
+df_stats.to_csv(path_to_output_folder / "initial_5s_variables_values.csv", index=False)
